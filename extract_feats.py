@@ -13,11 +13,14 @@ def extract_numbers(text):
     return [float(num) for num in numbers]
 
 
-def extract_feats(file):
+def extract_feats(file, return_txt=False):
     stats = []
     fread = open(file,"r")
     line = fread.read()
     line = line.strip()
     stats = extract_numbers(line)
     fread.close()
-    return stats
+    if return_txt:
+        return stats, line
+    else:
+        return stats

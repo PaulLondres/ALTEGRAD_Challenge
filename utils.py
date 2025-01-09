@@ -29,7 +29,7 @@ def preprocess_dataset(dataset, n_max_nodes, spectral_emb_dim):
         desc_file = './data/'+dataset+'/test.txt'
 
         if os.path.isfile(filename):
-            data_lst = torch.load(filename)
+            data_lst = torch.load(filename, weights_only=False)
             print(f'Dataset {filename} loaded from file')
 
         else:
@@ -42,7 +42,7 @@ def preprocess_dataset(dataset, n_max_nodes, spectral_emb_dim):
                 desc = "".join(desc)
                 feats_stats = extract_numbers(desc)
                 feats_stats = torch.FloatTensor(feats_stats).unsqueeze(0)
-                data_lst.append(Data(stats=feats_stats, filename = graph_id))
+                data_lst.append(Data(stats=feats_stats, cond_text=desc, filename = graph_id))
             fr.close()                    
             torch.save(data_lst, filename)
             print(f'Dataset {filename} saved')
@@ -54,7 +54,7 @@ def preprocess_dataset(dataset, n_max_nodes, spectral_emb_dim):
         desc_path = './data/'+dataset+'/description'
 
         if os.path.isfile(filename):
-            data_lst = torch.load(filename)
+            data_lst = torch.load(filename, weights_only=False)
             print(f'Dataset {filename} loaded from file')
 
         else:
@@ -130,10 +130,10 @@ def preprocess_dataset(dataset, n_max_nodes, spectral_emb_dim):
                 adj = F.pad(adj, [0, size_diff, 0, size_diff])
                 adj = adj.unsqueeze(0)
 
-                feats_stats = extract_feats(fstats)
+                feats_stats, text = extract_feats(fstats, return_txt=True)
                 feats_stats = torch.FloatTensor(feats_stats).unsqueeze(0)
 
-                data_lst.append(Data(x=x, edge_index=edge_index, A=adj, stats=feats_stats, filename = filen))
+                data_lst.append(Data(x=x, edge_index=edge_index, A=adj, stats=feats_stats, cond_text=text, filename = filen))
             torch.save(data_lst, filename)
             print(f'Dataset {filename} saved')
     return data_lst

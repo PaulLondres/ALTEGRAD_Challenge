@@ -24,6 +24,7 @@ from torch_geometric.loader import DataLoader
 from autoencoder import VariationalAutoEncoder
 from denoise_model import DenoiseNN, p_losses, sample
 from utils import linear_beta_schedule, construct_nx_from_adj, preprocess_dataset
+from prompt_embedding import get_conditioning_vector
 
 
 from torch.utils.data import Subset
@@ -90,7 +91,7 @@ parser.add_argument('--hidden-dim-denoise', type=int, default=512, help="Hidden 
 parser.add_argument('--n-layers_denoise', type=int, default=3, help="Number of layers in the denoising model (default: 3)")
 
 # Flag to toggle training of the autoencoder (VGAE)
-parser.add_argument('--train-autoencoder', action='store_false', default=True, help="Flag to enable/disable autoencoder (VGAE) training (default: enabled)")
+parser.add_argument('--train-autoencoder', action='store_false', default=False, help="Flag to enable/disable autoencoder (VGAE) training (default: enabled)")
 
 # Flag to toggle training of the diffusion-based denoising model
 parser.add_argument('--train-denoiser', action='store_true', default=True, help="Flag to enable/disable denoiser training (default: enabled)")
@@ -100,6 +101,8 @@ parser.add_argument('--dim-condition', type=int, default=128, help="Dimensionali
 
 # Number of conditions used in conditional vector (number of properties)
 parser.add_argument('--n-condition', type=int, default=7, help="Number of distinct condition properties used in conditional vector (default: 7)")
+
+parser.add_argument('--conditioning-embedding', choices=['regex_parsing', 'SBERT', 'DistilGPT2', 'RoBERTa'], default='regex_parsing')
 
 args = parser.parse_args()
 
@@ -201,7 +204,14 @@ sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
 #posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
 # initialize denoising model
-denoise_model = DenoiseNN(input_dim=args.latent_dim, hidden_dim=args.hidden_dim_denoise, n_layers=args.n_layers_denoise, n_cond=args.n_condition, d_cond=args.dim_condition).to(device)
+if args.conditioning_embedding=="regex_parsing":
+    n_cond_input = args.n_condition
+elif args.conditioning_embedding=="SBERT":
+    n_cond_input = 384
+else:
+    n_cond_input = 768
+
+denoise_model = DenoiseNN(input_dim=args.latent_dim, hidden_dim=args.hidden_dim_denoise, n_layers=args.n_layers_denoise, n_cond=n_cond_input, d_cond=args.dim_condition).to(device)
 optimizer = torch.optim.Adam(denoise_model.parameters(), lr=args.lr)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.1)
 
@@ -217,7 +227,8 @@ if args.train_denoiser:
             optimizer.zero_grad()
             x_g = autoencoder.encode(data)
             t = torch.randint(0, args.timesteps, (x_g.size(0),), device=device).long()
-            loss = p_losses(denoise_model, x_g, t, data.stats, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, loss_type="huber")
+            cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+            loss = p_losses(denoise_model, x_g, t, cond_vector, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, loss_type="huber")
             loss.backward()
             train_loss_all += x_g.size(0) * loss.item()
             train_count += x_g.size(0)
@@ -230,7 +241,8 @@ if args.train_denoiser:
             data = data.to(device)
             x_g = autoencoder.encode(data)
             t = torch.randint(0, args.timesteps, (x_g.size(0),), device=device).long()
-            loss = p_losses(denoise_model, x_g, t, data.stats, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, loss_type="huber")
+            cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+            loss = p_losses(denoise_model, x_g, t, cond_vector, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, loss_type="huber")
             val_loss_all += x_g.size(0) * loss.item()
             val_count += x_g.size(0)
 
@@ -262,22 +274,22 @@ with open("output.csv", "w", newline="") as csvfile:
     for k, data in enumerate(tqdm(test_loader, desc='Processing test set',)):
         data = data.to(device)
         
-        stat = data.stats
-        bs = stat.size(0)
+        #stat = data.stats
+        bs = data.stats.size(0)
 
         graph_ids = data.filename
-
-        samples = sample(denoise_model, data.stats, latent_dim=args.latent_dim, timesteps=args.timesteps, betas=betas, batch_size=bs)
+        cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+        samples = sample(denoise_model, cond_vector, latent_dim=args.latent_dim, timesteps=args.timesteps, betas=betas, batch_size=bs)
         x_sample = samples[-1]
         adj = autoencoder.decode_mu(x_sample)
-        stat_d = torch.reshape(stat, (-1, args.n_condition))
+        #stat_d = torch.reshape(stat, (-1, args.n_condition))
 
 
-        for i in range(stat.size(0)):
-            stat_x = stat_d[i]
+        for i in range(bs):
+            #stat_x = stat_d[i]
 
             Gs_generated = construct_nx_from_adj(adj[i,:,:].detach().cpu().numpy())
-            stat_x = stat_x.detach().cpu().numpy()
+            #stat_x = stat_x.detach().cpu().numpy()
 
             # Define a graph ID
             graph_id = graph_ids[i]
@@ -295,22 +307,22 @@ with open("validation_dataset_metrics.csv", "w", newline="") as csvfile:
     for k, data in enumerate(tqdm(val_loader, desc='Processing valid set', )):
         data = data.to(device)
 
-        stat = data.stats
-        bs = stat.size(0)
+        #stat = data.stats
+        bs = data.stats.size(0)
 
         graph_ids = data.filename
-
-        samples = sample(denoise_model, data.stats, latent_dim=args.latent_dim, timesteps=args.timesteps, betas=betas,
+        cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+        samples = sample(denoise_model, cond_vector, latent_dim=args.latent_dim, timesteps=args.timesteps, betas=betas,
                          batch_size=bs)
         x_sample = samples[-1]
         adj = autoencoder.decode_mu(x_sample)
-        stat_d = torch.reshape(stat, (-1, args.n_condition))
+        #stat_d = torch.reshape(stat, (-1, args.n_condition))
 
-        for i in range(stat.size(0)):
-            stat_x = stat_d[i]
+        for i in range(bs):
+            #stat_x = stat_d[i]
 
             Gs_generated = construct_nx_from_adj(adj[i, :, :].detach().cpu().numpy())
-            stat_x = stat_x.detach().cpu().numpy()
+            #stat_x = stat_x.detach().cpu().numpy()
 
             # Define a graph ID
             graph_id = graph_ids[i]
