@@ -91,7 +91,7 @@ parser.add_argument('--hidden-dim-denoise', type=int, default=512, help="Hidden 
 parser.add_argument('--n-layers_denoise', type=int, default=3, help="Number of layers in the denoising model (default: 3)")
 
 # Flag to toggle training of the autoencoder (VGAE)
-parser.add_argument('--train-autoencoder', action='store_false', default=False, help="Flag to enable/disable autoencoder (VGAE) training (default: enabled)")
+parser.add_argument('--train-autoencoder', action='store_false', default=True, help="Flag to enable/disable autoencoder (VGAE) training (default: enabled)")
 
 # Flag to toggle training of the diffusion-based denoising model
 parser.add_argument('--train-denoiser', action='store_true', default=True, help="Flag to enable/disable denoiser training (default: enabled)")
@@ -227,7 +227,7 @@ if args.train_denoiser:
             optimizer.zero_grad()
             x_g = autoencoder.encode(data)
             t = torch.randint(0, args.timesteps, (x_g.size(0),), device=device).long()
-            cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+            cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding).to(device)
             loss = p_losses(denoise_model, x_g, t, cond_vector, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, loss_type="huber")
             loss.backward()
             train_loss_all += x_g.size(0) * loss.item()
@@ -241,7 +241,7 @@ if args.train_denoiser:
             data = data.to(device)
             x_g = autoencoder.encode(data)
             t = torch.randint(0, args.timesteps, (x_g.size(0),), device=device).long()
-            cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+            cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding).to(device)
             loss = p_losses(denoise_model, x_g, t, cond_vector, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, loss_type="huber")
             val_loss_all += x_g.size(0) * loss.item()
             val_count += x_g.size(0)
@@ -278,7 +278,7 @@ with open("output.csv", "w", newline="") as csvfile:
         bs = data.stats.size(0)
 
         graph_ids = data.filename
-        cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+        cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding).to(device)
         samples = sample(denoise_model, cond_vector, latent_dim=args.latent_dim, timesteps=args.timesteps, betas=betas, batch_size=bs)
         x_sample = samples[-1]
         adj = autoencoder.decode_mu(x_sample)
@@ -311,7 +311,7 @@ with open("validation_dataset_metrics.csv", "w", newline="") as csvfile:
         bs = data.stats.size(0)
 
         graph_ids = data.filename
-        cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding)
+        cond_vector = get_conditioning_vector(data.stats, data.cond_text, args.conditioning_embedding).to(device)
         samples = sample(denoise_model, cond_vector, latent_dim=args.latent_dim, timesteps=args.timesteps, betas=betas,
                          batch_size=bs)
         x_sample = samples[-1]
