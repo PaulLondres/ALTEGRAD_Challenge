@@ -1,6 +1,6 @@
 import pandas as pd
 import networkx as nx
-from networkx.algorithms import community
+#from networkx.algorithms import community
 from utils import preprocess_dataset
 import numpy as np
 from sklearn.metrics import mean_absolute_error
@@ -26,12 +26,14 @@ def compute_metrics_from_edge_list(edge_list, return_dict = False):
     # Détecter les communautés avec une méthode exacte (partitionnement de Louvain)
     #partition = community.asyn_fluidc(G, k=max(2, num_nodes // 10))
     # num_communities = nx.number_connected_components(G)#len(list(partition))
-    connected_components = list(nx.connected_components(G))
-    num_communities = 0
-    for component in connected_components:
-        subgraph = G.subgraph(component)
-        partition = community.asyn_fluidc(subgraph, k=max(2, subgraph.number_of_nodes() // 10))
-        num_communities += len(list(partition))
+    # connected_components = list(nx.connected_components(G))
+    # num_communities = 0
+    # for component in connected_components:
+    #     subgraph = G.subgraph(component)
+    #     partition = community.asyn_fluidc(subgraph, k=max(2, subgraph.number_of_nodes() // 10))
+    #     num_communities += len(list(partition))
+    partition = nx.community.louvain_communities(G)
+    num_communities = len(partition)#len(set(partition.values()))
 
     if return_dict:
         return {
@@ -92,18 +94,17 @@ def compute_reference_graph_metrics(dataset_type = "valid", n_max_nodes=50, spec
     return metrics, graph_ids
 
 def MAE_normalized(ref, preds):
-    mae_rescaled = 0
-    for i in range(ref.shape[0]):
-        for j in range(ref.shape[1]):
-            if ref[i, j] > 0:
-                mae_rescaled += np.abs(ref[i, j] - preds[i, j]) /ref[i, j]
-            else:
-                mae_rescaled += np.abs(ref[i, j] - preds[i, j])
-    return mae_rescaled/ref.size
+    stds = np.std(ref, axis=0)
+    means = np.mean(ref, axis=0)
+    centered_reduced_ref = (ref - np.repeat(means[np.newaxis, :], 1000, axis=0))/stds
+    centered_reduced_preds = (preds - np.repeat(means[np.newaxis, :], 1000, axis=0)) / stds
+    final_mae = np.mean(np.abs(centered_reduced_ref - centered_reduced_preds))
+    return final_mae
+
 
 if __name__ == '__main__':
     csv_path_predicted = "validation_dataset_metrics.csv"
     metrics_predicted, graph_ids_pred = compute_predicted_graph_metrics(csv_path_predicted)
-    metrics_reference =  np.load("validation_dataset_metrics.npy")#compute_reference_graph_metrics()
+    metrics_reference =  np.load("validation_dataset_metrics.npy") # compute_reference_graph_metrics() #
     print("MAE : ", mean_absolute_error(metrics_reference, metrics_predicted))
     print("MAE with balanced metric impact : ", MAE_normalized(ref=metrics_reference, preds=metrics_predicted))
