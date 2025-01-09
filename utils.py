@@ -6,7 +6,7 @@ import scipy as sp
 import scipy.sparse
 import torch
 import torch.nn.functional as F
-import community as community_louvain
+#import community as community_louvain
 
 from torch import Tensor
 from torch.utils.data import Dataset
@@ -107,8 +107,8 @@ def preprocess_dataset(dataset, n_max_nodes, spectral_emb_dim):
                 diags = np.squeeze(np.asarray(diags))
                 D = sparse.diags(diags).toarray()
                 L = D - adj_bfs
-                with sp.errstate(divide="ignore"):
-                    diags_sqrt = 1.0 / np.sqrt(diags)
+                # with sp.special.errstate(divide="ignore"):
+                diags_sqrt = 1.0 / np.sqrt(diags)
                 diags_sqrt[np.isinf(diags_sqrt)] = 0
                 DH = sparse.diags(diags).toarray()
                 L = np.linalg.multi_dot((DH, L, DH))

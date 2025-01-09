@@ -166,7 +166,7 @@ if args.train_autoencoder:
 
         if epoch % 1 == 0:
             dt_t = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            print('{} Epoch: {:04d}, Train Loss: {:.5f}, Train Reconstruction Loss: {:.2f}, Train KLD Loss: {:.2f}, Val Loss: {:.5f}, Val Reconstruction Loss: {:.2f}, Val KLD Loss: {:.2f}'.format(dt_t,epoch, train_loss_all/cnt_train, train_loss_all_recon/cnt_train, train_loss_all_kld/cnt_train, val_loss_all/cnt_val, val_loss_all_recon/cnt_val, val_loss_all_kld/cnt_val))
+            print('{} Epoch: {:04d}, Train Loss: {:.5f}, Train Reconstruction Loss: {:.5f}, Train KLD Loss: {:.5f}, Val Loss: {:.5f}, Val Reconstruction Loss: {:.5f}, Val KLD Loss: {:.5f}'.format(dt_t,epoch, train_loss_all/cnt_train, train_loss_all_recon/cnt_train, train_loss_all_kld/cnt_train, val_loss_all/cnt_val, val_loss_all_recon/cnt_val, val_loss_all_kld/cnt_val))
             
         scheduler.step()
 
@@ -191,14 +191,14 @@ betas = linear_beta_schedule(timesteps=args.timesteps)
 alphas = 1. - betas
 alphas_cumprod = torch.cumprod(alphas, axis=0)
 alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0)
-sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
+#sqrt_recip_alphas = torch.sqrt(1.0 / alphas)
 
 # calculations for diffusion q(x_t | x_{t-1}) and others
 sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
 sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
 
 # calculations for posterior q(x_{t-1} | x_t, x_0)
-posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
+#posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
 # initialize denoising model
 denoise_model = DenoiseNN(input_dim=args.latent_dim, hidden_dim=args.hidden_dim_denoise, n_layers=args.n_layers_denoise, n_cond=args.n_condition, d_cond=args.dim_condition).to(device)
@@ -252,9 +252,9 @@ else:
 
 denoise_model.eval()
 
-del train_loader, val_loader
+del train_loader#, val_loader
 
-# Save to a CSV file
+# Save to a CSV file predictions on test set
 with open("output.csv", "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     # Write the header
@@ -284,5 +284,38 @@ with open("output.csv", "w", newline="") as csvfile:
 
             # Convert the edge list to a single string
             edge_list_text = ", ".join([f"({u}, {v})" for u, v in Gs_generated.edges()])           
+            # Write the graph ID and the full edge list as a single row
+            writer.writerow([graph_id, edge_list_text])
+
+# Save to a CSV file
+with open("validation_dataset_metrics.csv", "w", newline="") as csvfile:
+    writer = csv.writer(csvfile)
+    # Write the header
+    writer.writerow(["graph_id", "edge_list"])
+    for k, data in enumerate(tqdm(val_loader, desc='Processing valid set', )):
+        data = data.to(device)
+
+        stat = data.stats
+        bs = stat.size(0)
+
+        graph_ids = data.filename
+
+        samples = sample(denoise_model, data.stats, latent_dim=args.latent_dim, timesteps=args.timesteps, betas=betas,
+                         batch_size=bs)
+        x_sample = samples[-1]
+        adj = autoencoder.decode_mu(x_sample)
+        stat_d = torch.reshape(stat, (-1, args.n_condition))
+
+        for i in range(stat.size(0)):
+            stat_x = stat_d[i]
+
+            Gs_generated = construct_nx_from_adj(adj[i, :, :].detach().cpu().numpy())
+            stat_x = stat_x.detach().cpu().numpy()
+
+            # Define a graph ID
+            graph_id = graph_ids[i]
+
+            # Convert the edge list to a single string
+            edge_list_text = ", ".join([f"({u}, {v})" for u, v in Gs_generated.edges()])
             # Write the graph ID and the full edge list as a single row
             writer.writerow([graph_id, edge_list_text])
