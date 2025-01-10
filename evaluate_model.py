@@ -60,12 +60,16 @@ def compute_predicted_graph_metrics(csv_file_path):
         edge_list_str = row['edge_list']
 
         # Convertir la chaîne de caractères en liste d'arêtes
-        edge_list = eval(edge_list_str)
-
-        # Calculer les métriques
-        graph_metrics = compute_metrics_from_edge_list(edge_list)
-        metrics.append(graph_metrics)
-        graph_ids.append(graph_id)
+        if isinstance(edge_list_str, str):
+            edge_list = eval(edge_list_str)
+            if isinstance(edge_list[0], int):
+                edge_list = tuple([edge_list]) #Manage single edge case
+            # Calculer les métriques
+            graph_metrics = compute_metrics_from_edge_list(edge_list)
+            metrics.append(graph_metrics)
+            graph_ids.append(graph_id)
+        else:
+            metrics.append(np.zeros(7))
 
         # Ajouter l'ID du graphe et les métriques à la matrice
         # metrics.append([
@@ -99,8 +103,14 @@ def MAE_normalized(ref, preds):
     centered_reduced_ref = (ref - np.repeat(means[np.newaxis, :], 1000, axis=0))/stds
     centered_reduced_preds = (preds - np.repeat(means[np.newaxis, :], 1000, axis=0)) / stds
     final_mae = np.mean(np.abs(centered_reduced_ref - centered_reduced_preds))
-    return final_mae
+    final_mae_per_metric = np.mean(np.abs(centered_reduced_ref - centered_reduced_preds), axis=0)
+    return final_mae, final_mae_per_metric
 
+def compute_prediction_mae(csv_file_path, ref_npy_path="validation_dataset_metrics.npy"):
+    metrics_predicted, graph_ids_pred = compute_predicted_graph_metrics(csv_file_path)
+    metrics_reference = np.load(ref_npy_path)  # compute_reference_graph_metrics() #
+    mae, mae_per_metric = MAE_normalized(ref=metrics_reference, preds=metrics_predicted)
+    return mae, mae_per_metric
 
 if __name__ == '__main__':
     csv_path_predicted = "validation_dataset_metrics.csv"
