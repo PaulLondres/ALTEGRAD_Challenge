@@ -77,12 +77,22 @@ class DenoiseNN(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-        mlp_layers = [nn.Linear(input_dim+d_cond, hidden_dim)] + [nn.Linear(hidden_dim+d_cond, hidden_dim) for i in range(n_layers-2)]
+        mlp_layers = [nn.Linear(hidden_dim, hidden_dim)] + [nn.Linear(hidden_dim, hidden_dim) for i in range(n_layers-2)]
         mlp_layers.append(nn.Linear(hidden_dim, input_dim))
         self.mlp = nn.ModuleList(mlp_layers)
 
-        bn_layers = [nn.BatchNorm1d(hidden_dim) for i in range(n_layers-1)]
-        self.bn = nn.ModuleList(bn_layers)
+        attn_layers =[nn.MultiheadAttention(hidden_dim, 4) for i in range(n_layers)]
+        self.attn = nn.ModuleList(attn_layers)
+
+        self.V_matrices = nn.ModuleList([nn.Linear(input_dim, hidden_dim)] + [nn.Linear(hidden_dim, hidden_dim) for i in range(n_layers-2)] + [nn.Linear(hidden_dim, hidden_dim)])
+        self.K_matrices = nn.ModuleList([nn.Linear(input_dim, hidden_dim)] + [nn.Linear(hidden_dim, hidden_dim) for i in range(n_layers-2)] + [nn.Linear(hidden_dim, hidden_dim)])
+        self.Q_matrices = nn.ModuleList([nn.Linear(d_cond, hidden_dim)] + [nn.Linear(d_cond, hidden_dim) for i in range(n_layers-2)] + [nn.Linear(d_cond, hidden_dim)])
+
+        bn_layers_att = [nn.LayerNorm(hidden_dim) for i in range(n_layers)] # Change : Replaced batchnorm with layernorm
+        self.bn_att = nn.ModuleList(bn_layers_att)
+
+        bn_layers_mlp = [nn.LayerNorm(hidden_dim) for i in range(n_layers-1)]
+        self.bn_mlp = nn.ModuleList(bn_layers_mlp)
 
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
@@ -92,13 +102,40 @@ class DenoiseNN(nn.Module):
         cond = torch.nan_to_num(cond, nan=-100.0)
         cond = self.cond_mlp(cond)
         t = self.time_mlp(t)
-        for i in range(self.n_layers-1):
-            x = torch.cat((x, cond), dim=1)
-            x = self.relu(self.mlp[i](x))+t
-            x = self.bn[i](x)
-        x = self.mlp[self.n_layers-1](x)
-        return x
 
+        xlist_post_att = []
+        xlist_post_mlp = []
+        # for i in range(self.n_layers-1):
+        #     x = torch.cat((x, cond), dim=1)
+        #     x = self.relu(self.mlp[i](x))+t
+        #     x = self.bn[i](x)
+        # x = self.mlp[self.n_layers-1](x)
+        # return x
+
+        for i in range(self.n_layers):
+            v = self.V_matrices[i](x)
+            k = self.K_matrices[i](x)
+            q = self.Q_matrices[i](cond)
+            x = self.attn[i](q, k, v)[0]
+            x = self.relu(x)
+
+            if i and i < self.n_layers-1: x = x + xlist_post_att[i-1] # Residual connections
+
+            x = self.bn_att[i](x)
+
+            if i < self.n_layers-2: xlist_post_att.append(x.clone())
+            #x = torch.cat((x, cond), dim=1)
+            x = self.mlp[i](x)
+
+            if i == self.n_layers-1: break
+
+            x = self.relu(x)+t
+            if i and i<self.n_layers : x = x + xlist_post_mlp[i-1] # Residual connections
+            x = self.bn_mlp[i](x)
+            if i < self.n_layers-2: xlist_post_mlp.append(x.clone())
+        
+        return x
+        
 
 @torch.no_grad()
 def p_sample(model, x, t, cond, t_index, betas):

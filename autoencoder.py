@@ -19,9 +19,18 @@ class Decoder(nn.Module):
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
+        layernorm = [nn.LayerNorm(hidden_dim) for i in range(n_layers-1)]
+        self.layernorm = nn.ModuleList(layernorm)
+
     def forward(self, x):
         for i in range(self.n_layers-1):
             x = self.relu(self.mlp[i](x))
+            if i:
+                x = x + x_prev # Change : skip connections
+
+            x = self.layernorm[i](x)
+            x_prev = x.clone()
+
         
         x = self.mlp[self.n_layers-1](x)
         x = torch.reshape(x, (x.size(0), -1, 2))

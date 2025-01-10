@@ -25,7 +25,9 @@ from autoencoder import VariationalAutoEncoder
 from denoise_model import DenoiseNN, p_losses, sample
 from utils import linear_beta_schedule, construct_nx_from_adj, preprocess_dataset
 from prompt_embedding import get_conditioning_vector
+from evaluate_model import compute_prediction_mae
 
+import matplotlib.pyplot as plt
 
 from torch.utils.data import Subset
 np.random.seed(13)
@@ -46,7 +48,7 @@ parser = argparse.ArgumentParser(description='NeuralGraphGenerator')
 parser = argparse.ArgumentParser(description='Configuration for the NeuralGraphGenerator model')
 
 # Learning rate for the optimizer
-parser.add_argument('--lr', type=float, default=1e-3, help="Learning rate for the optimizer, typically a small float value (default: 0.001)")
+parser.add_argument('--lr', type=float, default=1e-2, help="Learning rate for the optimizer, typically a small float value (default: 0.001)") #Change : 0.001 to 0.01
 
 # Dropout rate
 parser.add_argument('--dropout', type=float, default=0.0, help="Dropout rate (fraction of nodes to drop) to prevent overfitting (default: 0.0)")
@@ -88,16 +90,16 @@ parser.add_argument('--timesteps', type=int, default=500, help="Number of timest
 parser.add_argument('--hidden-dim-denoise', type=int, default=512, help="Hidden dimension size for denoising model layers (default: 512)")
 
 # Number of layers in the denoising model
-parser.add_argument('--n-layers_denoise', type=int, default=3, help="Number of layers in the denoising model (default: 3)")
+parser.add_argument('--n-layers_denoise', type=int, default=5, help="Number of layers in the denoising model (default: 3)") # Change : increased n layers from 3
 
 # Flag to toggle training of the autoencoder (VGAE)
-parser.add_argument('--train-autoencoder', action='store_false', default=True, help="Flag to enable/disable autoencoder (VGAE) training (default: enabled)")
+parser.add_argument('--train-autoencoder', action='store_true', default=False, help="Flag to enable/disable autoencoder (VGAE) training (default: disabled)")
 
 # Flag to toggle training of the diffusion-based denoising model
 parser.add_argument('--train-denoiser', action='store_true', default=True, help="Flag to enable/disable denoiser training (default: enabled)")
 
 # Dimensionality of conditioning vectors for conditional generation
-parser.add_argument('--dim-condition', type=int, default=128, help="Dimensionality of conditioning vectors for conditional generation (default: 128)")
+parser.add_argument('--dim-condition', type=int, default=128*2, help="Dimensionality of conditioning vectors for conditional generation (default: 128)") # Change : increased dim-condition from 128
 
 # Number of conditions used in conditional vector (number of properties)
 parser.add_argument('--n-condition', type=int, default=7, help="Number of distinct condition properties used in conditional vector (default: 7)")
@@ -105,6 +107,9 @@ parser.add_argument('--n-condition', type=int, default=7, help="Number of distin
 parser.add_argument('--conditioning-embedding', choices=['regex_parsing', 'SBERT', 'DistilGPT2', 'RoBERTa'], default='regex_parsing')
 
 args = parser.parse_args()
+
+plot_losses_denoiser = False
+plot_losses_autoencoder = False
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -129,7 +134,10 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.1)
 
 
 # Train VGAE model
-if args.train_autoencoder:
+if args.train_autoencoder :
+    print("Training autoencoder")
+    train_losses, val_losses = [], []
+
     best_val_loss = np.inf
     for epoch in range(1, args.epochs_autoencoder+1):
         autoencoder.train()
@@ -139,6 +147,7 @@ if args.train_autoencoder:
         train_loss_all_kld = 0
         cnt_train=0
 
+        iter_loss = 0
         for data in train_loader:
             data = data.to(device)
             optimizer.zero_grad()
@@ -151,6 +160,10 @@ if args.train_autoencoder:
             train_count += torch.max(data.batch)+1
             optimizer.step()
 
+            iter_loss += loss.item()
+
+        train_losses.append(iter_loss/ len(train_loader))
+
         autoencoder.eval()
         val_loss_all = 0
         val_count = 0
@@ -158,6 +171,7 @@ if args.train_autoencoder:
         val_loss_all_recon = 0
         val_loss_all_kld = 0
 
+        iter_loss = 0
         for data in val_loader:
             data = data.to(device)
             loss, recon, kld  = autoencoder.loss_function(data)
@@ -166,6 +180,10 @@ if args.train_autoencoder:
             val_loss_all += loss.item()
             cnt_val+=1
             val_count += torch.max(data.batch)+1
+
+            iter_loss += loss.item()
+        
+        val_losses.append(iter_loss / len(val_loader))
 
         if epoch % 1 == 0:
             dt_t = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -179,6 +197,17 @@ if args.train_autoencoder:
                 'state_dict': autoencoder.state_dict(),
                 'optimizer' : optimizer.state_dict(),
             }, 'autoencoder.pth.tar')
+
+    if plot_losses_autoencoder:
+        plt.title("VAE Losses")
+        plt.plot(train_losses[1:], label='train')
+        plt.plot(val_losses[1:], label='val', alpha =0.8)
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
 else:
     checkpoint = torch.load('autoencoder.pth.tar')
     autoencoder.load_state_dict(checkpoint['state_dict'])
@@ -214,14 +243,22 @@ else:
 denoise_model = DenoiseNN(input_dim=args.latent_dim, hidden_dim=args.hidden_dim_denoise, n_layers=args.n_layers_denoise, n_cond=n_cond_input, d_cond=args.dim_condition).to(device)
 optimizer = torch.optim.Adam(denoise_model.parameters(), lr=args.lr)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.1)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
+
 
 # Train denoising model
 if args.train_denoiser:
+    train_losses = []
+    val_losses = []
+
+    #torch.autograd.set_detect_anomaly(True)
+    print("Training denoising model")
     best_val_loss = np.inf
     for epoch in range(1, args.epochs_denoise+1):
         denoise_model.train()
         train_loss_all = 0
         train_count = 0
+        iter_loss = 0
         for data in train_loader:
             data = data.to(device)
             optimizer.zero_grad()
@@ -234,9 +271,14 @@ if args.train_denoiser:
             train_count += x_g.size(0)
             optimizer.step()
 
+            iter_loss += loss.item()
+
+        train_losses.append(iter_loss/ len(train_loader)) 
+
         denoise_model.eval()
         val_loss_all = 0
         val_count = 0
+        iter_loss = 0
         for data in val_loader:
             data = data.to(device)
             x_g = autoencoder.encode(data)
@@ -246,11 +288,15 @@ if args.train_denoiser:
             val_loss_all += x_g.size(0) * loss.item()
             val_count += x_g.size(0)
 
+            iter_loss += loss.item()
+
+        val_losses.append(iter_loss / len(val_loader))
+
         if epoch % 5 == 0:
             dt_t = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             print('{} Epoch: {:04d}, Train Loss: {:.5f}, Val Loss: {:.5f}'.format(dt_t, epoch, train_loss_all/train_count, val_loss_all/val_count))
 
-        scheduler.step()
+        scheduler.step() # Change : no scheduler
 
         if best_val_loss >= val_loss_all:
             best_val_loss = val_loss_all
@@ -258,6 +304,17 @@ if args.train_denoiser:
                 'state_dict': denoise_model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
             }, 'denoise_model.pth.tar')
+
+    if plot_losses_denoiser:
+        plt.title("Denoiser Losses")
+        plt.plot(train_losses[1:], label='train')
+        plt.plot(val_losses[1:], label='val', alpha =0.8)
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
 else:
     checkpoint = torch.load('denoise_model.pth.tar')
     denoise_model.load_state_dict(checkpoint['state_dict'])
@@ -300,7 +357,8 @@ with open("output.csv", "w", newline="") as csvfile:
             writer.writerow([graph_id, edge_list_text])
 
 # Save to a CSV file
-with open("validation_dataset_metrics.csv", "w", newline="") as csvfile:
+output_val_pred_path = "validation_dataset_metrics.csv"
+with open(output_val_pred_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     # Write the header
     writer.writerow(["graph_id", "edge_list"])
@@ -331,3 +389,7 @@ with open("validation_dataset_metrics.csv", "w", newline="") as csvfile:
             edge_list_text = ", ".join([f"({u}, {v})" for u, v in Gs_generated.edges()])
             # Write the graph ID and the full edge list as a single row
             writer.writerow([graph_id, edge_list_text])
+
+final_mae, final_mae_per_metric = compute_prediction_mae(output_val_pred_path)
+print("Final MAE: {}".format(final_mae))
+print("Final MAE per metric: {}".format(final_mae_per_metric))
