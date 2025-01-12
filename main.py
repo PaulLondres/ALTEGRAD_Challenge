@@ -157,7 +157,6 @@ def train_denoiser(denoise_model, autoencoder, train_loader, val_loader, args, d
                 loss = p_losses(denoise_model, x_g, t, cond_vector, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, loss_type="huber")
                 val_loss += x_g.size(0) * loss.item()
                 val_count += x_g.size(0)
-        val_loss /= len(val_loader)
 
         writer.add_scalar('Denoiser/Val_Loss', val_loss/train_count, epoch)
 
@@ -166,7 +165,7 @@ def train_denoiser(denoise_model, autoencoder, train_loader, val_loader, args, d
             torch.save({
                 'state_dict': denoise_model.state_dict(),
                 'optimizer': optimizer.state_dict(),
-            }, os.path.join('denoise_model.pth.tar'))
+            }, os.path.join(save_dir, 'denoise_model.pth.tar'))
 
         if epoch % 10 == 0:
             #dt_t = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -184,7 +183,7 @@ def predict_and_evaluate(csv_path, autoencoder, denoise_model, loader, args, dev
         writer = csv.writer(csvfile)
         # Write the header
         writer.writerow(["graph_id", "edge_list"])
-        for k, data in enumerate(tqdm(loader, desc=f"Processing {loader}", )):
+        for k, data in enumerate(loader):
             data = data.to(device)
             # stat = data.stats
             bs = data.stats.size(0)
@@ -244,7 +243,7 @@ def main(args):
         n_layers=args.n_layers_denoise, n_cond=7, d_cond=args.dim_condition).to(device)
 
     # Entraînement de l'autoencoder
-    if args.train_autoencoder:
+    if not args.no_train_autoencoder:
         logger.info("Starting autoencoder training")
         autoencoder = train_autoencoder(autoencoder, train_loader, val_loader, loss_coeffs, args, device, writer, save_dir)
     else:
@@ -256,7 +255,7 @@ def main(args):
     sqrt_alphas_cumprod = torch.sqrt(torch.cumprod(1. - betas, axis=0))
     sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - torch.cumprod(1. - betas, axis=0))
 
-    if args.train_denoiser:
+    if not args.no_train_denoiser:
         logger.info("Starting denoiser training")
         denoise_model = train_denoiser(denoise_model, autoencoder, train_loader, val_loader, args, device, betas,
                                        sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, writer, save_dir)
@@ -347,11 +346,11 @@ if __name__ == "__main__":
                         help="Number of layers in the denoising model (default: 3)")  # Change : increased n layers from 3
 
     # Flag to toggle training of the autoencoder (VGAE)
-    parser.add_argument('--train-autoencoder', action='store_true', default=True,
+    parser.add_argument('--no-train-autoencoder', action='store_true', default=False,
                         help="Flag to enable/disable autoencoder (VGAE) training (default: disabled)")
 
     # Flag to toggle training of the diffusion-based denoising model
-    parser.add_argument('--train-denoiser', action='store_true', default=True,
+    parser.add_argument('--no-train-denoiser', action='store_true', default=False,
                         help="Flag to enable/disable denoiser training (default: enabled)")
 
     # Dimensionality of conditioning vectors for conditional generation
@@ -363,7 +362,7 @@ if __name__ == "__main__":
                         help="Number of distinct condition properties used in conditional vector (default: 7)")
 
     parser.add_argument('--conditioning-embedding', choices=['regex_parsing', 'SBERT', 'DistilGPT2', 'RoBERTa'],
-                        default='regex_parsing')
+                        default='regex_parsing', help="Method of conditioning embedding")
     args = parser.parse_args()
     main(args)
 
