@@ -225,15 +225,15 @@ def main(args):
     test_loader = DataLoader(testset, batch_size=args.batch_size, shuffle=False)
 
     # Modèles et optimisateurs
-    decoder_skip_connection = True
-    eps_scale = 0.02
-    loss_coeffs = {'coeff_loss_klv': 5e-7,
-    'coeff_loss_recon': 1,
-    'coeffs_loss_struc': {'coeff_global': 0.01,
-                          'coeff_node_count': 2e-3,
-                          'coeff_density': 0.3,
-                          'coeff_triangles': 1e-2}}
-
+    decoder_skip_connection = False
+    eps_scale = 0.17375207144267582
+    loss_coeffs = {'coeff_loss_klv': 1.882756150750523e-08,
+    'coeff_loss_recon': 0.8478671226835859,
+    'coeffs_loss_struc': {'coeff_global': 0*0.031941401900060534,
+                          'coeff_node_count': 0.01959580804704858,
+                          'coeff_density': 9.30206080117377,
+                          'coeff_triangles': 0.00042332120735373254}}
+    logger.info(f"decoder_skip_connection {decoder_skip_connection}, eps_scale {eps_scale}, loss_coeffs {loss_coeffs}")
     autoencoder = VariationalAutoEncoder(
         args.spectral_emb_dim + 1, args.hidden_dim_encoder, args.hidden_dim_decoder, args.latent_dim,
         args.n_layers_encoder, args.n_layers_decoder, args.n_max_nodes, decoder_skip_connection, eps_scale).to(device)

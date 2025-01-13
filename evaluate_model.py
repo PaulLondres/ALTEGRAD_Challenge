@@ -4,7 +4,6 @@ import networkx as nx
 from utils import preprocess_dataset
 import numpy as np
 from sklearn.metrics import mean_absolute_error
-from tqdm import tqdm
 import pickle
 
 def compute_metrics_from_edge_list(edge_list, return_dict = False):
@@ -55,7 +54,7 @@ def compute_predicted_graph_metrics(csv_file_path):
     # Matrice pour stocker les métriques
     metrics = []
     graph_ids = []
-    for _, row in tqdm(df.iterrows()):
+    for _, row in df.iterrows():
         graph_id = row['graph_id']
         edge_list_str = row['edge_list']
 
@@ -71,25 +70,13 @@ def compute_predicted_graph_metrics(csv_file_path):
         else:
             metrics.append(np.zeros(7))
 
-        # Ajouter l'ID du graphe et les métriques à la matrice
-        # metrics.append([
-        #     graph_id,
-        #     graph_metrics['num_nodes'],
-        #     graph_metrics['num_edges'],
-        #     graph_metrics['avg_degree'],
-        #     graph_metrics['num_triangles'],
-        #     graph_metrics['global_clustering'],
-        #     graph_metrics['max_k_core'],
-        #     graph_metrics['num_communities']
-        # ])
-
     return np.array(metrics), graph_ids
 
 def compute_reference_graph_metrics(dataset_type = "valid", n_max_nodes=50, spectral_emb_dim=10):
     dataset = preprocess_dataset(dataset_type, n_max_nodes, spectral_emb_dim)
     metrics = np.zeros((len(dataset), 7))
     graph_ids = []
-    for idx, graph in tqdm(enumerate(dataset)):
+    for idx, graph in enumerate(dataset):
         edge_list = [(i, j) for i, j in graph.edge_index.numpy().T]
         graph_id = graph.filename
         graph_ids.append(graph_id)
